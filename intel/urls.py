@@ -1,0 +1,8 @@
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path('attacker/<str:ip>/', views.get_attacker, name='get_attacker'),
+    path('lookup/', views.lookup_and_profile, name='lookup_and_profile'),
+    path('attackers/', views.list_attackers, name='list_attackers'),
+]
