@@ -1,7 +1,9 @@
-.env
-venv/
-__pycache__/
+backend/core/.env
+backend/venv/
+**/__pycache__/
 *.pyc
-db.sqlite3
-intel/mitre_data.json
+backend/db.sqlite3
+backend/intel/mitre_data.json
 .idea/
+frontend/node_modules/
+frontend/dist/
