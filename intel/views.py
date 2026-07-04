@@ -1,9 +1,9 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from .models import Attacker
+from .models import Attacker, MitreTechnique, CVE
 from .serializers import AttackerSerializer
 from .services import build_profile, load_mitre_techniques, map_tags_to_techniques
-from .models import MitreTechnique
+
 
 @api_view(['GET'])
 def get_attacker(request, ip):
@@ -14,6 +14,7 @@ def get_attacker(request, ip):
     except Attacker.DoesNotExist:
         return Response({'error': 'Not found. Run a lookup first.'}, status=404)
 
+
 @api_view(['POST'])
 def lookup_and_profile(request):
     ip = request.data.get('ip')
@@ -21,6 +22,8 @@ def lookup_and_profile(request):
         return Response({'error': 'ip is required'}, status=400)
 
     profile = build_profile(ip)
+    cves = profile.pop('_cves', [])
+
     attacker, _ = Attacker.objects.update_or_create(ip_address=ip, defaults=profile)
 
     vt_tags = profile['raw_data']['virustotal'].get('tags', [])
@@ -36,8 +39,20 @@ def lookup_and_profile(request):
                 )
                 mitre_obj.attackers.add(attacker)
 
+    for cve_data in cves:
+        cve_obj, _ = CVE.objects.update_or_create(
+            cve_id=cve_data['cve_id'],
+            defaults={
+                'description': cve_data['description'],
+                'severity': cve_data['severity'],
+                'cvss_score': cve_data['cvss_score'],
+            }
+        )
+        cve_obj.attackers.add(attacker)
+
     serializer = AttackerSerializer(attacker)
     return Response(serializer.data)
+
 
 @api_view(['GET'])
 def list_attackers(request):

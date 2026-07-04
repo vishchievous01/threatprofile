@@ -44,6 +44,50 @@ def map_tags_to_techniques(tags):
                 technique_ids.update(ids)
     return list(technique_ids)
 
+PORT_SERVICE_MAP = {
+    21: 'FTP',
+    22: 'OpenSSH',
+    23: 'Telnet',
+    25: 'SMTP',
+    80: 'Apache HTTP Server',
+    443: 'SSL',
+    3306: 'MySQL',
+    3389: 'RDP',
+    8080: 'Apache Tomcat',
+}
+
+def get_cves_for_ports(ports):
+    all_cves = []
+    seen_ids = set()
+    for port in ports:
+        service = PORT_SERVICE_MAP.get(port)
+        if not service:
+            continue
+        result = search_cve(service)
+        vulns = result.get('vulnerabilities', [])[:3]  # top 3 per service
+        for v in vulns:
+            cve_data = v.get('cve', {})
+            cve_id = cve_data.get('id')
+            if cve_id and cve_id not in seen_ids:
+                seen_ids.add(cve_id)
+                descriptions = cve_data.get('descriptions', [])
+                desc_text = next((d['value'] for d in descriptions if d['lang'] == 'en'), '')
+                metrics = cve_data.get('metrics', {})
+                cvss_score = 0.0
+                severity = ''
+                if 'cvssMetricV31' in metrics:
+                    cvss_score = metrics['cvssMetricV31'][0]['cvssData']['baseScore']
+                    severity = metrics['cvssMetricV31'][0]['cvssData']['baseSeverity']
+                elif 'cvssMetricV2' in metrics:
+                    cvss_score = metrics['cvssMetricV2'][0]['cvssData']['baseScore']
+                all_cves.append({
+                    'cve_id': cve_id,
+                    'description': desc_text[:500],
+                    'severity': severity,
+                    'cvss_score': cvss_score,
+                })
+    return all_cves
+
 def check_abuseipdb(ip):
     url = "https://api.abuseipdb.com/api/v2/check"
     headers= {'key': settings.ABUSEIPDB_KEY, 'Accept': 'application/json'}
@@ -71,6 +115,8 @@ def build_profile(ip):
     shodan = check_shodan(ip)
 
     vt_stats = vt.get('last_analysis_stats', {})
+    ports = shodan.get('ports', [])
+    cves = get_cves_for_ports(ports) if ports else []
 
     return {
         'country': abuse.get('countryCode', ''),
@@ -80,14 +126,15 @@ def build_profile(ip):
         'vt_malicious_votes': vt_stats.get('malicious', 0),
         'vt_suspicious_votes': vt_stats.get('suspicious', 0),
         'vt_reputation': vt.get('reputation', 0),
-        'open_ports': shodan.get('ports', []),
+        'open_ports': ports,
         'org': vt.get('as_owner', ''),
         'hostnames': shodan.get('hostnames', []),
         'raw_data': {
             'abuseipdb': abuse,
             'virustotal': vt,
             'shodan': shodan,
-        }
+        },
+        '_cves': cves,  # temporary key, handled separately below (CVE is a related model, not a direct field)
     }
 
 def search_cve(keyword):
