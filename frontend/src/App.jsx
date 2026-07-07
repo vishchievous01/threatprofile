@@ -8,6 +8,10 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [hasSearched, setHasSearched] = useState(false)
+  const [sigmaRules, setSigmaRules] = useState([])
+  const [showSigma, setShowSigma] = useState(false)
+  const [sigmaLoading, setSigmaLoading] = useState(false)
+  const [copiedId, setCopiedId] = useState('')
 
   const handleLookup = async () => {
     if (!ip.trim()) return
@@ -15,6 +19,8 @@ function App() {
     setError('')
     setProfile(null)
     setHasSearched(true)
+    setShowSigma(false)
+    setSigmaRules([])
     try {
       const res = await axios.post('http://127.0.0.1:8000/api/lookup/', { ip })
       setProfile(res.data)
@@ -23,6 +29,29 @@ function App() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleShowSigma = async () => {
+    if (showSigma) {
+      setShowSigma(false)
+      return
+    }
+    setSigmaLoading(true)
+    try {
+      const res = await axios.get(`http://127.0.0.1:8000/api/attacker/${profile.ip_address}/sigma/`)
+      setSigmaRules(res.data.sigma_rules)
+      setShowSigma(true)
+    } catch (err) {
+      setError('Could not load Sigma rules.')
+    } finally {
+      setSigmaLoading(false)
+    }
+  }
+
+  const handleCopy = (rule, techniqueId) => {
+    navigator.clipboard.writeText(rule)
+    setCopiedId(techniqueId)
+    setTimeout(() => setCopiedId(''), 1500)
   }
 
   const handleKeyDown = (e) => {
@@ -70,7 +99,7 @@ function App() {
 
       {!loading && !hasSearched && (
         <div className="empty-state">
-          <p>Enter an IP address above to build a full attacker profile -</p>
+          <p>Enter an IP address above to build a full attacker profile —</p>
           <p className="empty-state-sub">
             reputation, open ports, MITRE ATT&CK techniques, and related CVEs, all in one lookup.
           </p>
@@ -123,6 +152,34 @@ function App() {
                   <p>{cve.description}</p>
                 </div>
               ))}
+            </div>
+          )}
+
+          {profile.techniques?.length > 0 && (
+            <div className="section">
+              <button className="sigma-toggle" onClick={handleShowSigma} disabled={sigmaLoading}>
+                {sigmaLoading ? 'Loading...' : showSigma ? 'Hide Detection Rules' : 'Generate Sigma Detection Rules'}
+              </button>
+
+              {showSigma && sigmaRules.length > 0 && (
+                <div className="sigma-list">
+                  {sigmaRules.map((r) => (
+                    <div key={r.technique_id} className="sigma-item">
+                      <div className="sigma-header">
+                        <span className="tag">{r.technique_id}</span>
+                        <strong>{r.technique_name}</strong>
+                        <button
+                          className="copy-btn"
+                          onClick={() => handleCopy(r.sigma_rule, r.technique_id)}
+                        >
+                          {copiedId === r.technique_id ? 'Copied!' : 'Copy YAML'}
+                        </button>
+                      </div>
+                      <pre className="sigma-yaml">{r.sigma_rule}</pre>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

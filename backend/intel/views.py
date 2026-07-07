@@ -3,7 +3,26 @@ from rest_framework.response import Response
 from .models import Attacker, MitreTechnique, CVE
 from .serializers import AttackerSerializer
 from .services import build_profile, load_mitre_techniques, map_tags_to_techniques
+from .services import generate_sigma_rule
 
+@api_view(['GET'])
+def get_sigma_rules(request, ip):
+    try:
+        attacker = Attacker.objects.get(ip_address=ip)
+    except Attacker.DoesNotExist:
+        return Response({'error': 'Not found. Run a lookup first.'}, status=404)
+
+    rules = []
+    for technique in attacker.techniques.all():
+        rule_yaml = generate_sigma_rule(technique.technique_id, attacker.ip_address)
+        if rule_yaml:
+            rules.append({
+                'technique_id': technique.technique_id,
+                'technique_name': technique.name,
+                'sigma_rule': rule_yaml,
+            })
+
+    return Response({'ip_address': ip, 'sigma_rules': rules})
 
 @api_view(['GET'])
 def get_attacker(request, ip):

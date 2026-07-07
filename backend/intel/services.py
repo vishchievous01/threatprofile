@@ -35,6 +35,159 @@ TAG_TECHNIQUE_MAP = {
     'scanner': ['T1595'],
 }
 
+SIGMA_TEMPLATES = {
+    'T1090.003': """title: Traffic to Known Tor Exit Node
+id: {rule_id}
+status: experimental
+description: Detects outbound or inbound traffic involving a known Tor exit node IP, indicating potential anonymized C2 or exfiltration.
+references:
+    - https://attack.mitre.org/techniques/T1090/003/
+tags:
+    - attack.command_and_control
+    - attack.t1090.003
+logsource:
+    category: firewall
+detection:
+    selection:
+        dst_ip: '{ip}'
+    condition: selection
+falsepositives:
+    - Legitimate Tor usage (privacy tools, journalists, researchers)
+level: medium
+""",
+    'T1110': """title: Possible Brute Force Activity from Known Bad IP
+id: {rule_id}
+status: experimental
+description: Detects authentication attempts originating from an IP with a history of brute-force behavior.
+references:
+    - https://attack.mitre.org/techniques/T1110/
+tags:
+    - attack.credential_access
+    - attack.t1110
+logsource:
+    product: windows
+    service: security
+    definition: 'Requires Event ID 4625 (failed logon) auditing enabled'
+detection:
+    selection:
+        EventID: 4625
+        IpAddress: '{ip}'
+    timeframe: 5m
+    condition: selection | count() by IpAddress > 5
+falsepositives:
+    - Misconfigured service accounts
+    - Legitimate user password mistakes
+level: high
+""",
+    'T1021.004': """title: SSH Connection from Known Malicious IP
+id: {rule_id}
+status: experimental
+description: Detects SSH connection attempts from an IP flagged for malicious remote service abuse.
+references:
+    - https://attack.mitre.org/techniques/T1021/004/
+tags:
+    - attack.lateral_movement
+    - attack.t1021.004
+logsource:
+    category: firewall
+detection:
+    selection:
+        dst_port: 22
+        src_ip: '{ip}'
+    condition: selection
+falsepositives:
+    - Authorized remote administration
+level: medium
+""",
+    'T1566': """title: Inbound Traffic from IP Associated with Phishing Infrastructure
+id: {rule_id}
+status: experimental
+description: Detects network traffic from an IP previously associated with phishing campaigns.
+references:
+    - https://attack.mitre.org/techniques/T1566/
+tags:
+    - attack.initial_access
+    - attack.t1566
+logsource:
+    category: proxy
+detection:
+    selection:
+        c-ip: '{ip}'
+    condition: selection
+falsepositives:
+    - Shared hosting infrastructure with mixed reputation
+level: medium
+""",
+    'T1587.001': """title: Traffic from IP Linked to Known Malware Infrastructure
+id: {rule_id}
+status: experimental
+description: Detects traffic involving an IP associated with malware development/hosting infrastructure.
+references:
+    - https://attack.mitre.org/techniques/T1587/001/
+tags:
+    - attack.resource_development
+    - attack.t1587.001
+logsource:
+    category: firewall
+detection:
+    selection:
+        dst_ip: '{ip}'
+    condition: selection
+falsepositives:
+    - IP reassignment after infrastructure cleanup
+level: high
+""",
+    'T1584.005': """title: Traffic from IP Associated with Known Botnet Infrastructure
+id: {rule_id}
+status: experimental
+description: Detects communication with an IP identified as part of a botnet's compromised infrastructure.
+references:
+    - https://attack.mitre.org/techniques/T1584/005/
+tags:
+    - attack.resource_development
+    - attack.t1584.005
+logsource:
+    category: firewall
+detection:
+    selection:
+        dst_ip: '{ip}'
+    condition: selection
+falsepositives:
+    - IP reassignment after takedown
+level: high
+""",
+    'T1595': """title: Active Scanning Activity from Known Scanner IP
+id: {rule_id}
+status: experimental
+description: Detects inbound reconnaissance/scanning traffic from an IP known for active scanning behavior.
+references:
+    - https://attack.mitre.org/techniques/T1595/
+tags:
+    - attack.reconnaissance
+    - attack.t1595
+logsource:
+    category: firewall
+detection:
+    selection:
+        src_ip: '{ip}'
+        connection_state: 'SYN'
+    timeframe: 1m
+    condition: selection | count() by src_ip > 20
+falsepositives:
+    - Legitimate vulnerability scanning by internal security teams
+level: low
+""",
+}
+
+
+def generate_sigma_rule(technique_id, ip):
+    template = SIGMA_TEMPLATES.get(technique_id)
+    if not template:
+        return None
+    import uuid
+    rule_id = str(uuid.uuid4())
+    return template.format(ip=ip, rule_id=rule_id)
+
 def map_tags_to_techniques(tags):
     technique_ids = set()
     for tag in tags:
