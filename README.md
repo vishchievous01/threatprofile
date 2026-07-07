@@ -1,21 +1,24 @@
 # ThreatProfile
 
-**An automated threat intelligence aggregator that builds a complete attacker profile from a single IP address — replacing 20-30 minutes of manual OSINT across multiple tools with one API call.**
+**Automated Tier-1 IOC enrichment: correlates an IP across multiple threat intel sources, maps its behavior to MITRE ATT&CK, and surfaces the CVEs relevant to its exposed services — the same triage workflow a SOC analyst runs manually, encoded as a repeatable pipeline.**
 
-## The Problem
+## The Analyst Workflow This Replaces
 
-When a SOC analyst investigates a suspicious IP, they typically open 8-10 separate tools — VirusTotal, AbuseIPDB, Shodan, NVD, MITRE ATT&CK — and manually piece together a picture of the threat. This is slow, repetitive, and doesn't scale.
+When an alert fires on a suspicious source IP, a Tier-1 analyst typically has to:
+1. Check reputation across AbuseIPDB and VirusTotal
+2. Pull infrastructure details (ASN, org, open ports) from Shodan
+3. Judge whether the observed behavior (Tor exit node, brute-force pattern, botnet C2) maps to a known MITRE ATT&CK technique
+4. Cross-reference exposed services against NVD for relevant CVEs
+5. Decide whether this is a known actor or a first-time sighting
 
-## The Solution
+This is the manual enrichment step that happens before any real investigation begins — and it's identical every time. ThreatProfile encodes that workflow into one API call.
 
-ThreatProfile takes an IP address and automatically:
-1. Queries AbuseIPDB, VirusTotal, and Shodan (InternetDB) in parallel
-2. Merges the results into a single structured profile
-3. Maps observed indicators (tags, behavior) to MITRE ATT&CK techniques
-4. Persists the profile to a database, so previously-seen attackers are recognized instantly on future lookups
-5. Exposes everything through a REST API
+## What It Actually Does (the security logic, not just the API calls)
 
-Instead of asking *"Is this IP malicious?"*, it answers *"Who is this attacker, and what have they done?"*
+- **Reputation correlation:** merges AbuseIPDB confidence scores with VirusTotal's 90+ engine detection votes into a single risk picture, rather than trusting one source
+- **Technique attribution:** maps observed tags/behavior (e.g. `tor`, `botnet`, `brute-force`) to specific MITRE ATT&CK techniques (e.g. `T1090.003` – Multi-hop Proxy, `T1110` – Brute Force) — this requires knowing the ATT&CK taxonomy, not just calling an endpoint
+- **Exposure-based CVE correlation:** takes the actual open ports/services detected (via Shodan InternetDB) and queries NVD for CVEs relevant to *those specific services* — e.g. an exposed Apache instance surfaces Apache CVEs, not a generic list
+- **Persistent attacker memory:** once an IP is profiled, it's recognized instantly on future sightings instead of re-running the same lookups — mirroring how a real threat intel platform builds institutional memory over time
 
 ## Example Output
 
@@ -23,21 +26,27 @@ Instead of asking *"Is this IP malicious?"*, it answers *"Who is this attacker, 
 {
   "ip_address": "185.220.101.1",
   "country": "DE",
-  "isp": "Stiftung Erneuerbare Freiheit",
   "org": "Stiftung Erneuerbare Freiheit",
   "abuse_score": 100,
-  "total_reports": 342,
-  "vt_malicious_votes": 14,
+  "total_reports": 164,
+  "vt_malicious_votes": 13,
   "vt_suspicious_votes": 2,
-  "vt_reputation": -22,
-  "open_ports": [22, 9001],
-  "hostnames": [],
+  "open_ports": [80, 443, 9001, 9002],
+  "hostnames": ["berlin01.tor-exit.artikel10.org"],
   "techniques": [
     {
       "technique_id": "T1090.003",
       "name": "Multi-hop Proxy",
       "tactic": "command-and-control",
-      "description": "Adversaries may chain together multiple proxies..."
+      "description": "Adversaries may chain together multiple proxies to disguise the source of malicious traffic..."
+    }
+  ],
+  "cves": [
+    {
+      "cve_id": "CVE-2000-1168",
+      "severity": "",
+      "cvss_score": 7.5,
+      "description": "IBM HTTP Server 1.3.6 (based on Apache) allows remote attackers to cause a denial of service..."
     }
   ]
 }
@@ -46,9 +55,9 @@ Instead of asking *"Is this IP malicious?"*, it answers *"Who is this attacker, 
 ## Architecture
 
 ```
-                    ┌─────────────────┐
-   IP Address ─────▶│  Django REST API │
-                    └────────┬─────────┘
+                    ┌──────────────────┐
+   IP Address ─────▶│  Django REST API │◀───── React Frontend
+                    └────────┬─────────┘        (search + profile view)
                              │
           ┌──────────────────┼──────────────────┐
           ▼                  ▼                  ▼
@@ -58,41 +67,50 @@ Instead of asking *"Is this IP malicious?"*, it answers *"Who is this attacker, 
           │                  │                  │
           └──────────────────┼──────────────────┘
                              ▼
-                    ┌─────────────────┐
-                    │  Merge Engine    │
-                    └────────┬─────────┘
-                             ▼
-                    ┌─────────────────┐
-                    │ MITRE ATT&CK     │
-                    │ Tag → Technique  │
-                    │ Mapping          │
-                    └────────┬─────────┘
-                             ▼
-                    ┌─────────────────┐
-                    │  PostgreSQL/     │
-                    │  SQLite DB       │
-                    └────────┬─────────┘
-                             ▼
-                    ┌─────────────────┐
-                    │  REST API        │
-                    │  Response (JSON) │
-                    └─────────────────┘
+                    ┌──────────────────┐
+                    │  Merge Engine     │
+                    │  (rate-limit-safe:│
+                    │  failed calls     │
+                    │  never overwrite  │
+                    │  good data)       │
+                    └────────┬──────────┘
+                    ┌────────┴──────────┐
+                    ▼                   ▼
+         ┌────────────────────┐  ┌──────────────────┐
+         │ MITRE ATT&CK        │  │ NVD CVE Lookup    │
+         │ Tag → Technique      │  │ per open port/     │
+         │ Mapping              │  │ detected service    │
+         └────────┬─────────────┘  └────────┬───────────┘
+                    └──────────┬─────────────┘
+                                ▼
+                     ┌──────────────────┐
+                     │  PostgreSQL/      │
+                     │  SQLite DB        │
+                     │  (persistent      │
+                     │  attacker memory) │
+                     └────────┬──────────┘
+                                ▼
+                     ┌──────────────────┐
+                     │  REST API          │
+                     │  Response (JSON)   │
+                     └───────────────────┘
 ```
 
 ## Tech Stack
 
 - **Backend:** Django, Django REST Framework
+- **Frontend:** React (Vite), Axios
 - **Database:** SQLite (dev) / PostgreSQL (production-ready)
-- **Threat Intel Sources:** AbuseIPDB API, VirusTotal API, Shodan InternetDB
+- **Threat Intel Sources:** AbuseIPDB API, VirusTotal API, Shodan InternetDB, NVD CVE API
 - **Technique Mapping:** MITRE ATT&CK Enterprise (STIX/JSON dataset)
 
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/lookup/` | Runs a full lookup on a new IP and saves the profile |
-| `GET`  | `/api/attacker/<ip>/` | Retrieves a previously-saved attacker profile |
-| `GET`  | `/api/attackers/` | Lists all saved attacker profiles |
+| `POST` | `/api/lookup/` | Runs full enrichment on a new IP: reputation, ports, MITRE mapping, CVE correlation |
+| `GET`  | `/api/attacker/<ip>/` | Retrieves a previously-profiled attacker |
+| `GET`  | `/api/attackers/` | Lists all profiled attackers |
 
 ### Example Request
 ```bash
@@ -101,17 +119,28 @@ curl -X POST http://127.0.0.1:8000/api/lookup/ \
   -d '{"ip": "185.220.101.1"}'
 ```
 
+## Project Structure
+
+```
+threatprofile/
+├── backend/          Django REST API, enrichment pipeline, MITRE/CVE logic
+│   ├── core/          Django project settings
+│   └── intel/         Models, services (API integrations), views
+├── frontend/         React search UI + attacker profile card
+└── README.md
+```
+
 ## Setup
 
+**Backend:**
 ```bash
-git clone https://github.com/<your-username>/threatprofile.git
-cd threatprofile
+cd backend
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Create a `.env` file in the project root:
+Create a `.env` file inside `backend/core/`:
 ```
 ABUSEIPDB_KEY=your_key_here
 VT_KEY=your_key_here
@@ -128,25 +157,33 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-## How This Was Built
+**Frontend:**
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-This project was built incrementally over 4 focused sessions:
-1. **Django project setup + AbuseIPDB integration** — single-source IP lookup, saved to DB
-2. **Multi-source merge** — added VirusTotal and Shodan, unified into one profile
-3. **MITRE ATT&CK mapping** — parsed the full ATT&CK dataset and built a rule-based tag-to-technique mapping
-4. **REST API** — exposed the pipeline through Django REST Framework endpoints
+Visit `http://localhost:5173`.
+
+## Design Decisions Worth Noting
+
+- **Rate-limit resilience:** free-tier APIs (VirusTotal especially) occasionally fail or rate-limit. The merge logic only overwrites a field if fresh data was actually returned — a failed call never wipes out a previously-good profile with zeros. This matters in any pipeline pulling from third-party APIs with quotas.
+- **Rule-based technique mapping over black-box classification:** tag-to-technique mapping is explicit and auditable (a SOC tool that can't explain *why* it flagged a technique isn't trustworthy), rather than an opaque ML classifier.
+- **Service-specific CVE correlation:** CVEs are pulled based on the actual detected service on each open port, not a generic "here are some CVEs" list — this is closer to how vulnerability scanners scope their results.
 
 ## Roadmap
 
-- [ ] CVE correlation based on detected open ports/services
-- [ ] React frontend with search + attacker profile card
+- [ ] Sigma rule generation from detected MITRE techniques
+- [ ] YARA rule linkage for identified malware families
 - [ ] Relationship graph (IP ↔ malware ↔ campaign ↔ CVE)
 - [ ] Deployed live demo (Render/Railway)
 
 ## Why I Built This
 
-As a SOC analyst candidate, I wanted to demonstrate practical understanding of threat intelligence workflows — not just theory. This project mirrors what real SOC tooling does: aggregating multiple OSINT sources into a single, actionable attacker profile, with MITRE ATT&CK context to support triage and incident response decisions.
+As an EC-Council CSA-certified SOC analyst candidate, I wanted a project that demonstrates the actual judgment calls involved in IOC triage — not just API integration. The value here isn't the REST endpoints; it's encoding decisions like *which sources to trust for reputation*, *how to map observed behavior to ATT&CK techniques*, and *how to scope CVE relevance to what's actually exposed* — the same reasoning a Tier-1/Tier-2 analyst applies dozens of times a shift.
 
 ---
 
-**Author:** Vishnu | EC-Council CSA Certified | [LinkedIn](https://www.linkedin.com/in/pvvishnu498/)
+**Author:** Vishnu — EC-Council CSA Certified SOC Analyst | [LinkedIn](https://www.linkedin.com/in/pvvishnu498/)
+
