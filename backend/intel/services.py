@@ -99,6 +99,9 @@ def check_virustotal(ip):
     url = f"https://www.virustotal.com/api/v3/ip_addresses/{ip}"
     headers = {'x-apikey': settings.VT_KEY}
     resp = requests.get(url, headers=headers)
+    if resp.status_code != 200:
+        print(f"VirusTotal error {resp.status_code}: {resp.text}")
+        return {}
     return resp.json()
 
 def check_shodan(ip):
@@ -111,31 +114,40 @@ def check_shodan(ip):
 
 def build_profile(ip):
     abuse = check_abuseipdb(ip).get('data', {})
-    vt = check_virustotal(ip).get('data', {}).get('attributes', {})
+    vt_response = check_virustotal(ip)
+    vt = vt_response.get('data', {}).get('attributes', {})
     shodan = check_shodan(ip)
 
     vt_stats = vt.get('last_analysis_stats', {})
     ports = shodan.get('ports', [])
     cves = get_cves_for_ports(ports) if ports else []
 
-    return {
+    profile = {
         'country': abuse.get('countryCode', ''),
         'isp': abuse.get('isp', ''),
         'abuse_score': abuse.get('abuseConfidenceScore', 0),
         'total_reports': abuse.get('totalReports', 0),
-        'vt_malicious_votes': vt_stats.get('malicious', 0),
-        'vt_suspicious_votes': vt_stats.get('suspicious', 0),
-        'vt_reputation': vt.get('reputation', 0),
-        'open_ports': ports,
-        'org': vt.get('as_owner', ''),
-        'hostnames': shodan.get('hostnames', []),
         'raw_data': {
             'abuseipdb': abuse,
             'virustotal': vt,
             'shodan': shodan,
         },
-        '_cves': cves,  # temporary key, handled separately below (CVE is a related model, not a direct field)
+        '_cves': cves,
     }
+
+    # Only overwrite VT/Shodan fields if we actually got fresh data,
+    # so a rate-limited or failed call doesn't wipe out good existing data.
+    if vt:
+        profile['vt_malicious_votes'] = vt_stats.get('malicious', 0)
+        profile['vt_suspicious_votes'] = vt_stats.get('suspicious', 0)
+        profile['vt_reputation'] = vt.get('reputation', 0)
+        profile['org'] = vt.get('as_owner', '')
+
+    if shodan:
+        profile['open_ports'] = ports
+        profile['hostnames'] = shodan.get('hostnames', [])
+
+    return profile
 
 def search_cve(keyword):
     url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
