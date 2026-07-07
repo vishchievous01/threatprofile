@@ -18,6 +18,7 @@ This is the manual enrichment step that happens before any real investigation be
 - **Reputation correlation:** merges AbuseIPDB confidence scores with VirusTotal's 90+ engine detection votes into a single risk picture, rather than trusting one source
 - **Technique attribution:** maps observed tags/behavior (e.g. `tor`, `botnet`, `brute-force`) to specific MITRE ATT&CK techniques (e.g. `T1090.003` – Multi-hop Proxy, `T1110` – Brute Force) — this requires knowing the ATT&CK taxonomy, not just calling an endpoint
 - **Exposure-based CVE correlation:** takes the actual open ports/services detected (via Shodan InternetDB) and queries NVD for CVEs relevant to *those specific services* — e.g. an exposed Apache instance surfaces Apache CVEs, not a generic list
+- **Detection rule generation:** for each identified MITRE technique, auto-generates a matching Sigma rule with the attacker's IP baked in as the indicator — turning a lookup directly into something a SIEM can ingest, rather than leaving detection engineering as a manual follow-up step
 - **Persistent attacker memory:** once an IP is profiled, it's recognized instantly on future sightings instead of re-running the same lookups — mirroring how a real threat intel platform builds institutional memory over time
 
 ## Example Output
@@ -110,6 +111,7 @@ This is the manual enrichment step that happens before any real investigation be
 |--------|----------|-------------|
 | `POST` | `/api/lookup/` | Runs full enrichment on a new IP: reputation, ports, MITRE mapping, CVE correlation |
 | `GET`  | `/api/attacker/<ip>/` | Retrieves a previously-profiled attacker |
+| `GET`  | `/api/attacker/<ip>/sigma/` | Generates Sigma detection rules for the attacker's identified MITRE techniques |
 | `GET`  | `/api/attackers/` | Lists all profiled attackers |
 
 ### Example Request
@@ -174,7 +176,7 @@ Visit `http://localhost:5173`.
 
 ## Roadmap
 
-- [ ] Sigma rule generation from detected MITRE techniques
+- [x] Sigma rule generation from detected MITRE techniques
 - [ ] YARA rule linkage for identified malware families
 - [ ] Relationship graph (IP ↔ malware ↔ campaign ↔ CVE)
 - [ ] Deployed live demo (Render/Railway)
@@ -185,5 +187,5 @@ As an EC-Council CSA-certified SOC analyst candidate, I wanted a project that de
 
 ---
 
-**Author:** Vishnu — EC-Council CSA Certified SOC Analyst | [LinkedIn](https://www.linkedin.com/in/pvvishnu498/)
+**Author:** Vishnu — EC-Council CSA Certified SOC Analyst [LinkedIn](https://www.linkedin.com/in/pvvishnu498/)
 
