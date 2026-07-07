@@ -7,12 +7,14 @@ function App() {
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [hasSearched, setHasSearched] = useState(false)
 
   const handleLookup = async () => {
     if (!ip.trim()) return
     setLoading(true)
     setError('')
     setProfile(null)
+    setHasSearched(true)
     try {
       const res = await axios.post('http://127.0.0.1:8000/api/lookup/', { ip })
       setProfile(res.data)
@@ -53,7 +55,29 @@ function App() {
 
       {error && <p className="error">{error}</p>}
 
-      {profile && (
+      {loading && (
+        <div className="profile-card skeleton">
+          <div className="skeleton-line skeleton-title"></div>
+          <div className="skeleton-line skeleton-short"></div>
+          <div className="skeleton-grid">
+            <div className="skeleton-line"></div>
+            <div className="skeleton-line"></div>
+            <div className="skeleton-line"></div>
+            <div className="skeleton-line"></div>
+          </div>
+        </div>
+      )}
+
+      {!loading && !hasSearched && (
+        <div className="empty-state">
+          <p>Enter an IP address above to build a full attacker profile -</p>
+          <p className="empty-state-sub">
+            reputation, open ports, MITRE ATT&CK techniques, and related CVEs, all in one lookup.
+          </p>
+        </div>
+      )}
+
+      {!loading && profile && (
         <div className="profile-card">
           <div className="profile-header">
             <h2>{profile.ip_address}</h2>
@@ -103,6 +127,10 @@ function App() {
           )}
         </div>
       )}
+
+      <footer className="app-footer">
+        Powered by AbuseIPDB · VirusTotal · Shodan (InternetDB) · MITRE ATT&CK · NVD
+      </footer>
     </div>
   )
 }

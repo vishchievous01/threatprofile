@@ -136,3 +136,66 @@ h1 {
   color: #ccc;
   line-height: 1.4;
 }
+
+/* --- Additions --- */
+
+.empty-state {
+  background: #161616;
+  border: 1px dashed #333;
+  border-radius: 12px;
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  color: #888;
+}
+
+.empty-state p {
+  margin: 0.25rem 0;
+}
+
+.empty-state-sub {
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.skeleton {
+  overflow: hidden;
+}
+
+.skeleton-line {
+  height: 1rem;
+  background: linear-gradient(90deg, #1e1e1e 25%, #2a2a2a 50%, #1e1e1e 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 4px;
+  margin-bottom: 0.75rem;
+}
+
+.skeleton-title {
+  width: 40%;
+  height: 1.5rem;
+}
+
+.skeleton-short {
+  width: 25%;
+}
+
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.app-footer {
+  margin-top: 3rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: #555;
+  padding-top: 1.5rem;
+  border-top: 1px solid #222;
+}
